@@ -17,7 +17,18 @@ public interface GlslStmt {
 		return new Raw(s);
 	}
 
+	static GlslStmt declare(String type, String name, GlslExpr value) {
+		return new Declare(type, name, value);
+	}
+
 	String prettyPrint();
+
+	record Declare(String type, String name, GlslExpr expr) implements GlslStmt {
+		@Override
+		public String prettyPrint() {
+			return type + " " + name + " = " + expr.prettyPrint() + ";";
+		}
+	}
 
 	record Eval(GlslExpr expr) implements GlslStmt {
 		@Override

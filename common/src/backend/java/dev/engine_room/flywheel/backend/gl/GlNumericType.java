@@ -1,9 +1,11 @@
 package dev.engine_room.flywheel.backend.gl;
 
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL42;
 
 public enum GlNumericType {
 	FLOAT(4, "float", GL11.GL_FLOAT),
+	HALF_FLOAT(2, "float", GL42.GL_HALF_FLOAT),
 	UBYTE(1, "ubyte", GL11.GL_UNSIGNED_BYTE),
 	BYTE(1, "byte", GL11.GL_BYTE),
 	USHORT(2, "ushort", GL11.GL_UNSIGNED_SHORT),

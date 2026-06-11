@@ -104,6 +104,7 @@ public class LayoutAttributes {
 			case INT, NORMALIZED_INT -> GlNumericType.INT;
 			case UNSIGNED_INT, NORMALIZED_UNSIGNED_INT -> GlNumericType.UINT;
 			case FLOAT -> GlNumericType.FLOAT;
+			case HALF_FLOAT -> GlNumericType.HALF_FLOAT;
 		};
 	}
 

@@ -5,7 +5,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 import dev.engine_room.flywheel.api.instance.InstanceType;
@@ -21,8 +23,13 @@ import dev.engine_room.flywheel.api.layout.ValueRepr;
 import dev.engine_room.flywheel.api.layout.VectorElementType;
 import dev.engine_room.flywheel.backend.compile.LayoutInterpreter;
 import dev.engine_room.flywheel.backend.glsl.SourceComponent;
+import dev.engine_room.flywheel.backend.glsl.generate.GlslBlock;
 import dev.engine_room.flywheel.backend.glsl.generate.GlslBuilder;
 import dev.engine_room.flywheel.backend.glsl.generate.GlslExpr;
+
+import dev.engine_room.flywheel.backend.glsl.generate.GlslStmt;
+
+import org.jetbrains.annotations.Nullable;
 
 public abstract class InstanceAssemblerComponent implements SourceComponent {
 	protected static final String STRUCT_NAME = "FlwInstance";
@@ -66,6 +73,7 @@ public abstract class InstanceAssemblerComponent implements SourceComponent {
 	}
 
 	protected final Layout layout;
+	protected final Map<Integer, String> halfTemps = new HashMap<>();
 
 	public InstanceAssemblerComponent(InstanceType<?> type) {
 		layout = type.layout();
@@ -90,8 +98,13 @@ public abstract class InstanceAssemblerComponent implements SourceComponent {
 	public String source() {
 		var builder = new GlslBuilder();
 		generateUnpacking(builder);
+		resetTemps();
 		builder.blankLine();
 		return builder.build();
+	}
+
+	protected void resetTemps() {
+		halfTemps.clear();
 	}
 
 	protected abstract void generateUnpacking(GlslBuilder builder);
@@ -99,48 +112,99 @@ public abstract class InstanceAssemblerComponent implements SourceComponent {
 	protected abstract GlslExpr access(int uintOffset);
 
 	protected GlslExpr unpackElement(Layout.Element element) {
-		return unpackElement(element.type(), element.byteOffset());
+		return unpackElement(element.type(), element.byteOffset(), null);
 	}
 
-	private GlslExpr unpackElement(ElementType type, int byteOffset) {
+	protected GlslExpr unpackElement(Layout.Element element, GlslBlock body) {
+		return unpackElement(element.type(), element.byteOffset(), body);
+	}
+
+	private GlslExpr unpackElement(ElementType type, int byteOffset, @Nullable GlslBlock body) {
 		if (type instanceof ScalarElementType scalar) {
-			return unpackScalar(scalar, byteOffset);
+			return unpackScalar(scalar, byteOffset, body);
 		} else if (type instanceof VectorElementType vector) {
-			return unpackVector(vector, byteOffset);
+			return unpackVector(vector, byteOffset, body);
 		} else if (type instanceof MatrixElementType matrix) {
-			return unpackMatrix(matrix, byteOffset);
+			return unpackMatrix(matrix, byteOffset, body);
 		} else if (type instanceof ArrayElementType array) {
-			return unpackArray(array, byteOffset);
+			return unpackArray(array, byteOffset, body);
 		}
 
 		throw new IllegalArgumentException("Unknown type " + type);
 	}
 
-	private GlslExpr unpackScalar(ScalarElementType type, int byteOffset) {
+	private GlslExpr unpackScalar(ScalarElementType type, int byteOffset, @Nullable GlslBlock body) {
 		var repr = type.repr();
+		if (repr == FloatRepr.HALF_FLOAT) {
+			int shortOffset = byteOffset / Short.BYTES;
+			return unpackHalfFloatScalar(shortOffset, body);
+		}
 		Function<GlslExpr, GlslExpr> unpackingFunc = getUnpackingFunc(repr);
 		return unpackScalar(byteOffset, repr.byteSize(), unpackingFunc);
 	}
 
-	private GlslExpr unpackVector(VectorElementType type, int byteOffset) {
+	private GlslExpr unpackHalfFloatScalar(int shortOffset, @Nullable GlslBlock body) {
+		int wordOffset = shortOffset / 2;
+
+		int lane = shortOffset % 2;
+		if (BIG_ENDIAN) {
+			lane = 1 - lane;
+		}
+
+		GlslExpr vec2 = halfTempForWord(wordOffset, body);
+		return vec2.swizzle(lane == 0 ? "x" : "y");
+	}
+
+	private GlslExpr halfTempForWord(int wordOffset, @Nullable GlslBlock body)  {
+		if (body != null) {
+			String name = halfTemps.computeIfAbsent(wordOffset, k -> {
+				String tempName = "_flw_h" + k;
+				// vec2 _flw_h<k> = unpackHalf2x16(access(k));
+				body.add(GlslStmt.declare("vec2", tempName, access(k).callFunction("unpackHalf2x16")));
+				return tempName;
+			});
+			return GlslExpr.variable(name);
+		}
+
+		return access(wordOffset).callFunction("unpackHalf2x16");
+	}
+
+	private GlslExpr unpackHalfFloatVector(String outType, int size, int shortOffset, @Nullable GlslBlock body) {
+		if (size == 2 && (shortOffset % 2 == 0) != BIG_ENDIAN) {
+			int wordOffset = shortOffset / 2;
+			return access(wordOffset).callFunction("unpackHalf2x16");
+		}
+
+		List<GlslExpr> args = new ArrayList<>(size);
+		for (int i = 0; i < size; i++) {
+			args.add(unpackHalfFloatScalar(shortOffset + i, body));
+		}
+		return GlslExpr.call(outType, args);
+	}
+
+	private GlslExpr unpackVector(VectorElementType type, int byteOffset, @Nullable GlslBlock body) {
 		var repr = type.repr();
+		if (repr == FloatRepr.HALF_FLOAT) {
+			int shortOffset = byteOffset / Short.BYTES;
+			return unpackHalfFloatVector(LayoutInterpreter.vectorTypeName(type), type.size(), shortOffset, body);
+		}
 		int size = type.size();
 		Function<GlslExpr, GlslExpr> unpackingFunc = getUnpackingFunc(repr);
 		String outType = LayoutInterpreter.vectorTypeName(type);
-		return unpackVector(outType, size, byteOffset, repr.byteSize(), unpackingFunc);
+		return unpackVector(outType, size, byteOffset, repr, unpackingFunc, body);
 	}
 
-	private GlslExpr unpackMatrix(MatrixElementType type, int byteOffset) {
+	private GlslExpr unpackMatrix(MatrixElementType type, int byteOffset, @Nullable GlslBlock body) {
 		var repr = type.repr();
 		int rows = type.rows();
 		int columns = type.columns();
 		Function<GlslExpr, GlslExpr> unpackingFunc = FLOAT_UNPACKING_FUNCS.get(repr);
 		String outType = LayoutInterpreter.matrixTypeName(type);
 		int size = rows * columns;
-		return unpackVector(outType, size, byteOffset, repr.byteSize(), unpackingFunc);
+		return unpackVector(outType, size, byteOffset, repr, unpackingFunc, body);
 	}
 
-	private GlslExpr unpackArray(ArrayElementType type, int byteOffset) {
+	private GlslExpr unpackArray(ArrayElementType type, int byteOffset, @Nullable GlslBlock body) {
 		ElementType innerType = type.innerType();
 		int innerByteSize = innerType.byteSize();
 		int length = type.length();
@@ -148,7 +212,7 @@ public abstract class InstanceAssemblerComponent implements SourceComponent {
 
 		List<GlslExpr> args = new ArrayList<>();
 		for (int i = 0; i < length; i++) {
-			args.add(unpackElement(innerType, byteOffset + i * innerByteSize));
+			args.add(unpackElement(innerType, byteOffset + i * innerByteSize, body));
 		}
 		return GlslExpr.call(outType, args);
 	}
@@ -193,11 +257,14 @@ public abstract class InstanceAssemblerComponent implements SourceComponent {
 		return unpackingFunc.apply(access(intOffset));
 	}
 
-	private GlslExpr unpackVector(String outType, int size, int byteOffset, int byteSize, Function<GlslExpr, GlslExpr> unpackingFunc) {
+	private GlslExpr unpackVector(String outType, int size, int byteOffset, ValueRepr repr, Function<GlslExpr, GlslExpr> unpackingFunc, @Nullable GlslBlock body) {
+		int byteSize = repr.byteSize();
 		int offset = byteOffset / byteSize;
 
 		if (byteSize == Byte.BYTES) {
 			return unpackByteBackedVector(outType, size, offset, unpackingFunc);
+		} else if (repr == FloatRepr.HALF_FLOAT) {
+			return unpackHalfFloatVector(outType, size, offset, body);
 		} else if (byteSize == Short.BYTES) {
 			return unpackShortBackedVector(outType, size, offset, unpackingFunc);
 		} else {

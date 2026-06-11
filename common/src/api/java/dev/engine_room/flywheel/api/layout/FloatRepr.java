@@ -13,7 +13,8 @@ public enum FloatRepr implements ValueRepr {
 	NORMALIZED_INT(Integer.BYTES),
 	UNSIGNED_INT(Integer.BYTES),
 	NORMALIZED_UNSIGNED_INT(Integer.BYTES),
-	FLOAT(Float.BYTES);
+	FLOAT(Float.BYTES),
+	HALF_FLOAT(Short.BYTES);
 
 	private final int byteSize;
 

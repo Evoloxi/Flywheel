@@ -83,21 +83,22 @@ public final class InstanceTypes {
 	public static final InstanceType<ShadowInstance> SHADOW = SimpleInstanceType.builder(ShadowInstance::new)
 			.layout(LayoutBuilder.create()
 					.vector("pos", FloatRepr.FLOAT, 3)
-					.vector("entityPosXZ", FloatRepr.FLOAT, 2)
-					.vector("size", FloatRepr.FLOAT, 2)
-					.scalar("alpha", FloatRepr.FLOAT)
-					.scalar("radius", FloatRepr.FLOAT)
+					.vector("entityPosXZ", FloatRepr.HALF_FLOAT, 2)
+					.vector("size", FloatRepr.HALF_FLOAT, 2)
+					.scalar("alpha", FloatRepr.HALF_FLOAT)
+					.scalar("radius", FloatRepr.HALF_FLOAT)
+					.matrix("dummy", FloatRepr.HALF_FLOAT, 4)
 					.build())
 			.writer((ptr, instance) -> {
 				MemoryUtil.memPutFloat(ptr, instance.x);
 				MemoryUtil.memPutFloat(ptr + 4, instance.y);
 				MemoryUtil.memPutFloat(ptr + 8, instance.z);
-				MemoryUtil.memPutFloat(ptr + 12, instance.entityX);
-				MemoryUtil.memPutFloat(ptr + 16, instance.entityZ);
-				MemoryUtil.memPutFloat(ptr + 20, instance.sizeX);
-				MemoryUtil.memPutFloat(ptr + 24, instance.sizeZ);
-				MemoryUtil.memPutFloat(ptr + 28, instance.alpha);
-				MemoryUtil.memPutFloat(ptr + 32, instance.radius);
+				MemoryUtil.memPutShort(ptr + 12, Float.floatToFloat16(instance.entityX));
+				MemoryUtil.memPutShort(ptr + 14, Float.floatToFloat16(instance.entityZ));
+				MemoryUtil.memPutShort(ptr + 16, Float.floatToFloat16(instance.sizeX));
+				MemoryUtil.memPutShort(ptr + 18, Float.floatToFloat16(instance.sizeZ));
+				MemoryUtil.memPutShort(ptr + 20, Float.floatToFloat16(instance.alpha));
+				MemoryUtil.memPutShort(ptr + 22, Float.floatToFloat16(instance.radius));
 			})
 			.vertexShader(ResourceUtil.rl("instance/shadow.vert"))
 			.cullShader(ResourceUtil.rl("instance/cull/shadow.glsl"))

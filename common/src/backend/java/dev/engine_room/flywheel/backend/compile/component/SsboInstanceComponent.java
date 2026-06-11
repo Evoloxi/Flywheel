@@ -38,7 +38,7 @@ public class SsboInstanceComponent extends InstanceAssemblerComponent {
 
 		var unpackArgs = new ArrayList<GlslExpr>();
 		for (Layout.Element element : layout.elements()) {
-			unpackArgs.add(unpackElement(element));
+			unpackArgs.add(unpackElement(element, fnBody));
 		}
 
 		fnBody.ret(GlslExpr.call(STRUCT_NAME, unpackArgs));
